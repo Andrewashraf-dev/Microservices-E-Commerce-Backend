@@ -1,0 +1,11 @@
+provision-keycloak.sh
+.env
+.env.local
+.env.production
+.env.test
+.vscode/
+node_modules/
+dist/
+coverage/
+keycloak-init/
+realm-export.json
