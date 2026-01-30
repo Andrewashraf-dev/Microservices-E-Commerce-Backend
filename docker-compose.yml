@@ -1,0 +1,160 @@
+version: "3.9"
+
+services:
+  # ============================================================================
+  # DATABASES
+  # ============================================================================
+  keycloak-db:
+    image: postgres:15-alpine
+    container_name: keycloak-db
+    environment:
+      POSTGRES_DB: keycloak_db
+      POSTGRES_USER: keycloak_user
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-admin}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak_user -d keycloak_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ecommerce-backend
+
+  order-db:
+    image: postgres:15-alpine
+    container_name: order-db
+    environment:
+      POSTGRES_DB: order_db
+      POSTGRES_USER: order_user
+      POSTGRES_PASSWORD: ${ORDER_DB_PASSWORD:-admin}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U order_user -d order_db"]
+      interval: 5s
+      retries: 5
+    networks:
+      - ecommerce-backend
+
+  inventory-db:
+    image: postgres:15-alpine
+    container_name: inventory-db
+    environment:
+      POSTGRES_DB: inventory_db
+      POSTGRES_USER: inventory_user
+      POSTGRES_PASSWORD: ${INVENTORY_DB_PASSWORD:-admin}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inventory_user -d inventory_db"]
+      interval: 5s
+      retries: 5
+    networks:
+      - ecommerce-backend
+
+  # ============================================================================
+  # KEYCLOAK
+  # ============================================================================
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.0
+    container_name: keycloak
+    command: ["start-dev"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak_db
+      KC_DB_USERNAME: keycloak_user
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-admin}
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      
+      # FIX: Use 'keycloak' as internal hostname
+      KC_HOSTNAME: keycloak
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "${KEYCLOAK_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080; echo -e 'GET /health/live HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3; grep -q 'HTTP/1.1 200 OK' <&3"]
+      interval: 10s
+      retries: 20
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    networks:
+      - ecommerce-backend
+
+  # AUTOMATION: This container creates the realm and client secrets automatically
+  keycloak-setup:
+    image: quay.io/keycloak/keycloak:24.0.0
+    container_name: keycloak-setup
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    volumes:
+      - ./provision-keycloak.sh:/opt/keycloak/provision.sh
+    entrypoint: ["/bin/bash", "/opt/keycloak/provision.sh"]
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-ecommerce-realm}
+      ORDER_SERVICE_CLIENT_ID: ${ORDER_SERVICE_CLIENT_ID}
+      ORDER_SERVICE_CLIENT_SECRET: ${ORDER_SERVICE_CLIENT_SECRET}
+    networks:
+      - ecommerce-backend
+
+  # ============================================================================
+  # MICROSERVICES
+  # ============================================================================
+  order-service:
+    build:
+      context: ./order-service
+    container_name: order-service
+    restart: unless-stopped
+    ports:
+      - "${ORDER_SERVICE_PORT:-8081}:8081"
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      SERVER_PORT: 8081
+      SPRING_DATASOURCE_URL: jdbc:postgresql://order-db:5432/order_db
+      SPRING_DATASOURCE_USERNAME: order_user
+      SPRING_DATASOURCE_PASSWORD: ${ORDER_DB_PASSWORD:-admin}
+      
+      # FIX: Internal URL matches Keycloak's KC_HOSTNAME
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://keycloak:8080/realms/${KEYCLOAK_REALM:-ecommerce-realm}
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_KEYCLOAK_CLIENT_ID: ${ORDER_SERVICE_CLIENT_ID}
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_KEYCLOAK_CLIENT_SECRET: ${ORDER_SERVICE_CLIENT_SECRET}
+    depends_on:
+      keycloak-setup:
+        condition: service_completed_successfully
+      order-db:
+        condition: service_healthy
+    networks:
+      - ecommerce-backend
+
+  inventory-service:
+    build:
+      context: ./inventory-service
+    container_name: inventory-service
+    restart: unless-stopped
+    ports:
+      - "${INVENTORY_SERVICE_PORT:-8082}:8082"
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      SERVER_PORT: 8082
+      SPRING_DATASOURCE_URL: jdbc:postgresql://inventory-db:5432/inventory_db
+      SPRING_DATASOURCE_USERNAME: inventory_user
+      SPRING_DATASOURCE_PASSWORD: ${INVENTORY_DB_PASSWORD:-admin}
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://keycloak:8080/realms/${KEYCLOAK_REALM:-ecommerce-realm}
+    depends_on:
+      keycloak-setup:
+        condition: service_completed_successfully
+      inventory-db:
+        condition: service_healthy
+    networks:
+      - ecommerce-backend
+
+networks:
+  ecommerce-backend:
+    driver: bridge
+
+volumes:
+  keycloak-db-data:
+  order-db-data:
+  inventory-db-data:
+  keycloak-data:

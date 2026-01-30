@@ -1,0 +1,8 @@
+1-Keycloack native
+2-postgresql native
+3-run two services local
+4- without docker 
+
+
+------
+

@@ -1,0 +1,18 @@
+{
+  "realm": "ecommerce-realm",
+  "enabled": true,
+  "clients": [
+    {
+      "clientId": "order-service-client",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "your-very-long-secret-here",
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect"
+    }
+  ]
+}

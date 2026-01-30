@@ -1,0 +1,4 @@
+com\example\inventoryservice\Config\SecurityConfig.class
+com\example\inventoryservice\InventoryServiceApplication.class
+com\example\inventoryservice\Inventory\InventoryController.class
+com\example\inventoryservice\Inventory\Inventory.class
